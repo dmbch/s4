@@ -1,9 +1,28 @@
 <?php
+/**
+ * @copyright 2014 Daniel Dembach
+ * @license https://raw.github.com/dmbch/s4/master/LICENSE
+ * @package dmbch/s4
+ */
 
+/**
+ * Stupidly Simple Storage Service
+ *
+ * Minimal php/curl client for Amazon S3 using AWS Signature Version 4
+ *
+ * http://docs.aws.amazon.com/AmazonS3/latest/API/APIRest.html
+ */
 class S4
 {
+  /**
+   * URL template
+   */
   const ENDPOINT_TEMPLATE     = 'https://@host.amazonaws.com';
 
+  /**
+   * AWS/S3 regions
+   * http://docs.aws.amazon.com/general/latest/gr/rande.html#s3_region
+   */
   const REGION_AUSTRALIA      = 'ap-southeast-2';
   const REGION_BRAZIL         = 'sa-east-1';
   const REGION_CALIFORNIA     = 'us-west-1';
@@ -13,6 +32,10 @@ class S4
   const REGION_SINGAPORE      = 'ap-southeast-1';
   const REGION_VIRGINIA       = 'us-east-1';
 
+  /**
+   * AWS/S3 canned acls
+   * http://docs.aws.amazon.com/AmazonS3/latest/dev/ACLOverview.html#CannedACL
+   */
   const ACL_PRIVATE           = 'private';
   const ACL_PUBLIC_READ       = 'public-read';
   const ACL_PUBLIC_FULL       = 'public-read-write';
@@ -21,28 +44,61 @@ class S4
   const ACL_OWNER_FULL        = 'bucket-owner-full-control';
   const ACL_LOG_WRITE         = 'log-delivery-write';
 
+  /**
+   * AWS/S3 encryption algo
+   * http://docs.aws.amazon.com/AmazonS3/latest/dev/SSEUsingRESTAPI.html
+   */
   const ENCRYPTION_AES256     = 'AES256';
 
+  /**
+   * AWS/S3 storage redundancy
+   * http://docs.aws.amazon.com/AmazonS3/latest/dev/UsingMetadata.html
+   */
   const REDUNDANCY_STANDARD   = 'STANDARD';
   const REDUNDANCY_REDUCED    = 'REDUCED_REDUNDANCY';
 
+  /**
+   * AWS/S3 request headers
+   * http://docs.aws.amazon.com/AmazonS3/latest/API/RESTCommonRequestHeaders.html
+   */
   const HEADER_ACL            = 'x-amz-acl';
   const HEADER_ENCRYPTION     = 'x-amz-server-side-encryption';
   const HEADER_REDUNDANCY     = 'x-amz-storage-class';
   const HEADER_SHA256         = 'x-amz-content-sha256';
 
 
+  /**
+   * @var string
+   */
   protected $accessKey;
 
+  /**
+   * @var string
+   */
   protected $secretKey;
 
+  /**
+   * @var string
+   */
   protected $bucket;
 
+  /**
+   * @var string
+   */
   protected $region;
 
+  /**
+   * @var string
+   */
   protected $endpoint;
 
 
+  /**
+   * @param string $accessKey
+   * @param string $secretKey
+   * @param string $bucket
+   * @param string $region (optional)
+   */
   public function __construct($accessKey, $secretKey, $bucket, $region = self::REGION_VIRGINIA)
   {
     $this->accessKey = $accessKey;
@@ -55,8 +111,16 @@ class S4
   }
 
 
-  public function upload($key, $file, $acl = self::ACL_PRIVATE, $redundancy = self::REDUNDANCY_STANDARD, $headers = array())
+  /**
+   * @param string $key
+   * @param mixed $file
+   * @param string $acl (optional)
+   * @param string $redundancy (optional)
+   * @param array $headers (optional)
+   */
+  public function put($key, $file, $acl = self::ACL_PRIVATE, $redundancy = self::REDUNDANCY_STANDARD, $headers = array())
   {
+    $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
 
     if (is_file($file)) {
@@ -82,7 +146,6 @@ class S4
 
     rewind($handle);
     $cache = (0 === strpos($acl, 'public')) ? 'public' : 'private';
-    $path = "/$this->bucket/". ltrim($key, '/');
     $headers = array_replace(
       array(
         static::HEADER_ACL        => $acl,
@@ -109,16 +172,59 @@ class S4
   }
 
 
-  public function download($key, $file = null)
+  /**
+   * @param string $key
+   * @param mixed $file
+   * @return array
+   */
+  public function get($key, $file = null)
   {
+    $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
+
+    if (is_string($file)) {
+      $handle = fopen($file, 'w+');
+    }
+    elseif (is_resource($file)) {
+      $handle = $file;
+    }
+    else {
+      $handle = fopen('php://temp', 'w+');
+      $file = null;
+    }
+    $options = array(CURLOPT_FILE => $handle);
+
+    $result = $this->request('GET', $path, array(), $options);
+
+    rewind($handle);
+    if ($file) {
+      $result['result'] = $handle;
+    }
+    else {
+      $result['result'] = stream_get_contents($handle);
+    }
+    return $result;
   }
 
 
-  public function remove($key)
+  /**
+   * @param string $key
+   * @return array
+   */
+  public function delete($key)
   {
+    $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
+
+    return $this->request('DELETE', $path);
   }
 
 
+  /**
+   * @param string $method (optional)
+   * @param string $path (optional)
+   * @param array $headers (optional)
+   * @param array $options (optional)
+   * @return array
+   */
   public function request($method = 'GET', $path = '/', $headers = array(), $options = array())
   {
     $path = '/'. ltrim($path, '/');
@@ -153,12 +259,22 @@ class S4
   }
 
 
+  /**
+   * http://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
+   *
+   * @param string $method
+   * @param string $url
+   * @param array $headers
+   * @return string
+   */
   protected function sign($method, $url, $headers)
   {
+    // extract info from arguments
     $date       = gmdate('Ymd', strtotime($headers['Date']));
     $query      = parse_url($url, PHP_URL_QUERY);
     $path       = parse_url($url, PHP_URL_PATH);
 
+    // process headers
     $canonical  = array();
     foreach ($headers as $key => $value) {
       $canonical[] = sprintf('%s:%s', strtolower($key), trim($value));
@@ -166,31 +282,38 @@ class S4
     $canonical  = implode("\n", $canonical);
     $signed     = implode(';', array_map('strtolower', array_keys($headers)));
 
+    // generate request checksum
     $request    = sprintf(
       "%s\n%s\n%s\n%s\n\n%s\n%s",
       $method, $path, $query, $canonical, $signed, $headers[static::HEADER_SHA256]
     );
     $checksum   = hash('sha256', $request);
 
+    // prepare signature
     $scope      = sprintf('%s/%s/s3/aws4_request', $date, $this->region);
     $string     = sprintf("AWS4-HMAC-SHA256\n%s\n%s\n%s", $headers['Date'], $scope, $checksum);
     $key        = $this->keygen($date);
 
-    $signature  = hash_hmac('sha256', $string, $key);
-
+    // calculate signature
     return sprintf(
       'AWS4-HMAC-SHA256 Credential=%s/%s,SignedHeaders=%s,Signature=%s',
-      $this->accessKey, $scope, $signed, $signature
+      $this->accessKey, $scope, $signed, hash_hmac('sha256', $string, $key)
     );
   }
 
 
+  /**
+   * @param string $date
+   * @return string
+   */
   protected function keygen($date)
   {
+    // gather ingredients
     $region     = $this->region;
     $service    = 's3';
     $format     = 'aws4_request';
 
+    // mix up signing key
     $secretKey  = "AWS4$this->secretKey";
     $dateKey    = hash_hmac('sha256', $date,    $secretKey,   true);
     $regionKey  = hash_hmac('sha256', $region,  $dateKey,     true);
@@ -220,7 +343,7 @@ class S4
       $options
     ));
 
-    // perform post request, gather response data
+    // perform request, gather response data
     $result = curl_exec($handle);
     $error = curl_error($handle);
     $info = curl_getinfo($handle);
