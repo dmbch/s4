@@ -21,14 +21,15 @@ class S4
   const ACL_OWNER_FULL        = 'bucket-owner-full-control';
   const ACL_LOG_WRITE         = 'log-delivery-write';
 
-  const HEADER_SHA256         = 'x-amz-content-sha256';
-  const HEADER_STORAGE_CLASS  = 'x-amz-storage-class';
+  const ENCRYPTION_AES256     = 'AES256';
+
+  const REDUNDANCY_STANDARD   = 'STANDARD';
+  const REDUNDANCY_REDUCED    = 'REDUCED_REDUNDANCY';
+
+  const HEADER_ACL            = 'x-amz-acl';
   const HEADER_ENCRYPTION     = 'x-amz-server-side-encryption';
-
-  const STORAGE_STANDARD      = 'STANDARD';
-  const STORAGE_REDUCED       = 'REDUCED_REDUNDANCY';
-
-  const ENCRYPTION_AES        = 'AES256';
+  const HEADER_REDUNDANCY     = 'x-amz-storage-class';
+  const HEADER_SHA256         = 'x-amz-content-sha256';
 
 
   protected $accessKey;
@@ -42,7 +43,7 @@ class S4
   protected $endpoint;
 
 
-  public function __construct($accessKey, $secretKey, $bucket = null, $region = self::REGION_VIRGINIA)
+  public function __construct($accessKey, $secretKey, $bucket, $region = self::REGION_VIRGINIA)
   {
     $this->accessKey = $accessKey;
     $this->secretKey = $secretKey;
@@ -50,27 +51,89 @@ class S4
     $this->region = $region;
 
     $host = ($region === self::REGION_VIRGINIA) ? 's3' : "s3-$region";
-
     $this->endpoint = str_replace('@host', $host, static::ENDPOINT_TEMPLATE);
   }
 
 
-  public function request($method = 'GET', $path = '/', $file = null, $headers = array(), $options = array())
+  public function upload($key, $file, $acl = self::ACL_PRIVATE, $redundancy = self::REDUNDANCY_STANDARD, $headers = array())
+  {
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+
+    if (is_file($file)) {
+      $handle = fopen($file, 'r');
+      $hash = hash_file('sha256', $file);
+      $length = filesize($file);
+      $type = finfo_file($finfo, $file);
+    }
+    elseif (is_resource($file)) {
+      $handle = $file;
+      $file = stream_get_meta_data($handle)['uri'];
+      $hash = hash_file('sha256', $file);
+      $length = filesize($file);
+      $type = finfo_file($finfo, $file);
+    }
+    else {
+      $handle = fopen('php://temp', 'w+');
+      $hash = hash('sha256', $file);
+      $length = strlen($file);
+      $type = 'text/plain';
+      fwrite($handle, $file, $length);
+    }
+
+    rewind($handle);
+    $cache = (0 === strpos($acl, 'public')) ? 'public' : 'private';
+    $path = "/$this->bucket/". ltrim($key, '/');
+    $headers = array_replace(
+      array(
+        static::HEADER_ACL        => $acl,
+        static::HEADER_REDUNDANCY => $redundancy,
+        static::HEADER_SHA256     => $hash,
+        'Cache-Control'           => $cache,
+        'Content-Length'          => $length,
+        'Content-Type'            => $type
+      ),
+      $headers
+    );
+    $options = array(
+      CURLOPT_PUT             => true,
+      CURLOPT_INFILE          => $handle,
+      CURLOPT_INFILESIZE      => $length
+    );
+
+    $result = $this->request('PUT', $path, $headers, $options);
+
+    fclose($handle);
+    finfo_close($finfo);
+
+    return $result;
+  }
+
+
+  public function download($key, $file = null)
+  {
+  }
+
+
+  public function remove($key)
+  {
+  }
+
+
+  public function request($method = 'GET', $path = '/', $headers = array(), $options = array())
   {
     $path = '/'. ltrim($path, '/');
     $url = $this->endpoint . $path;
-    $hash = (is_null($file)) ? hash('sha256', '') : hash_file('sha256', $file);
 
     $headers = array_replace(
       array(
         'Date'                => gmdate('D, d M Y H:i:s \G\M\T'),
         'Host'                => parse_url($url, PHP_URL_HOST),
-        static::HEADER_SHA256 => $hash
+        static::HEADER_SHA256 => hash('sha256', '')
       ),
       $headers
     );
     ksort($headers);
-    $headers['Authorization'] = $this->sign($method, $path, $headers);
+    $headers['Authorization'] = $this->sign($method, $url, $headers);
 
     $formatted = array();
     foreach ($headers as $key => $value) {
@@ -90,12 +153,13 @@ class S4
   }
 
 
-  protected function sign($method, $path, $headers)
+  protected function sign($method, $url, $headers)
   {
     $date       = gmdate('Ymd', strtotime($headers['Date']));
-    $query      = parse_url("$this->endpoint/$path", PHP_URL_QUERY);
+    $query      = parse_url($url, PHP_URL_QUERY);
+    $path       = parse_url($url, PHP_URL_PATH);
 
-    $canonical = array();
+    $canonical  = array();
     foreach ($headers as $key => $value) {
       $canonical[] = sprintf('%s:%s', strtolower($key), trim($value));
     }
@@ -123,10 +187,15 @@ class S4
 
   protected function keygen($date)
   {
-    $dateKey    = hash_hmac('sha256', $date, "AWS4$this->secretKey", true);
-    $regionKey  = hash_hmac('sha256', $this->region, $dateKey, true);
-    $serviceKey = hash_hmac('sha256', 's3', $regionKey, true);
-    $signingKey = hash_hmac('sha256', 'aws4_request', $serviceKey, true);
+    $region     = $this->region;
+    $service    = 's3';
+    $format     = 'aws4_request';
+
+    $secretKey  = "AWS4$this->secretKey";
+    $dateKey    = hash_hmac('sha256', $date,    $secretKey,   true);
+    $regionKey  = hash_hmac('sha256', $region,  $dateKey,     true);
+    $serviceKey = hash_hmac('sha256', $service, $regionKey,   true);
+    $signingKey = hash_hmac('sha256', $format,  $serviceKey,  true);
 
     return $signingKey;
   }
