@@ -124,7 +124,7 @@ class S4
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
 
     // analyze file (hash, length, mime type)
-    if (is_file($file)) {
+    if (is_string($file) && is_file($file)) {
       $handle = fopen($file, 'r');
       $hash = hash_file('sha256', $file);
       $length = filesize($file);
