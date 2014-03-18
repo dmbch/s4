@@ -210,6 +210,7 @@ class S4
     }
     else {
       $result['result'] = stream_get_contents($handle);
+      fclose($handle);
     }
     return $result;
   }
