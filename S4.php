@@ -5,8 +5,9 @@
  * @package dmbch/s4
  */
 
+
 /**
- * Stupidly Simple Storage Service
+ * S4 - Stupidly Simple Storage Service
  *
  * Minimal php/curl client for Amazon S3 using AWS Signature Version 4
  *
@@ -17,7 +18,7 @@ class S4
   /**
    * URL template
    */
-  const ENDPOINT_TEMPLATE     = 'https://@host.amazonaws.com';
+  const ENDPOINT_URL_TEMPLATE = 'https://@host.amazonaws.com';
 
   /**
    * AWS/S3 regions
@@ -107,7 +108,7 @@ class S4
     $this->region = $region;
 
     $host = ($region === self::REGION_VIRGINIA) ? 's3' : "s3-$region";
-    $this->endpoint = str_replace('@host', $host, static::ENDPOINT_TEMPLATE);
+    $this->endpoint = str_replace('@host', $host, static::ENDPOINT_URL_TEMPLATE);
   }
 
 
@@ -127,6 +128,7 @@ class S4
     if (is_string($file) && is_file($file)) {
       $handle = fopen($file, 'r');
       $hash = hash_file('sha256', $file);
+      $checksum = base64_encode(hash_file('md5', $file, true));
       $length = filesize($file);
       $type = finfo_file($finfo, $file);
     }
@@ -134,19 +136,20 @@ class S4
       $handle = $file;
       $file = stream_get_meta_data($handle)['uri'];
       $hash = hash_file('sha256', $file);
+      $checksum = base64_encode(hash_file('md5', $file, true));
       $length = filesize($file);
       $type = finfo_file($finfo, $file);
     }
     else {
       $handle = fopen('php://temp', 'w+');
       $hash = hash('sha256', $file);
+      $checksum = base64_encode(hash('md5', $file, true));
       $length = strlen($file);
       $type = 'text/plain';
       fwrite($handle, $file, $length);
     }
 
     // prepare headers
-    rewind($handle);
     $cache = (0 === strpos($acl, 'public')) ? 'public' : 'private';
     $headers = array_replace(
       array(
@@ -154,6 +157,7 @@ class S4
         static::HEADER_REDUNDANCY => $redundancy,
         static::HEADER_SHA256     => $hash,
         'Cache-Control'           => $cache,
+        'Content-MD5'             => $checksum,
         'Content-Length'          => $length,
         'Content-Type'            => $type
       ),
@@ -161,10 +165,11 @@ class S4
     );
 
     // prepare curl options
+    rewind($handle);
     $options = array(
-      CURLOPT_PUT             => true,
-      CURLOPT_INFILE          => $handle,
-      CURLOPT_INFILESIZE      => $length
+      CURLOPT_PUT         => true,
+      CURLOPT_INFILE      => $handle,
+      CURLOPT_INFILESIZE  => $length
     );
 
     // execute curl request
@@ -193,6 +198,7 @@ class S4
     }
     elseif (is_resource($file)) {
       $handle = $file;
+      $file = stream_get_meta_data($handle)['uri'];
     }
     else {
       $handle = fopen('php://temp', 'w+');
@@ -205,13 +211,9 @@ class S4
 
     // prepare result
     rewind($handle);
-    if ($file) {
-      $result['result'] = $handle;
-    }
-    else {
-      $result['result'] = stream_get_contents($handle);
-      fclose($handle);
-    }
+    $result['result'] = $file ?: stream_get_contents($handle);
+    fclose($handle);
+
     return $result;
   }
 
@@ -237,8 +239,8 @@ class S4
    */
   public function request($method = 'GET', $path = '/', $headers = array(), $options = array())
   {
-    $path = '/'. ltrim($path, '/');
-    $url = $this->endpoint . $path;
+    $path = sprintf('/%s', ltrim($path, '/'));
+    $url = sprintf('%s%s', $this->endpoint, $path);
 
     $headers = array_replace(
       array(
@@ -266,6 +268,55 @@ class S4
     );
 
     return $this->curl($options);
+  }
+
+
+  /**
+   * http://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
+   *
+   * @param string $key
+   * @param int $ttl
+   * @return string
+   */
+  public function presign($key, $ttl = 3600)
+  {
+    // generate date strings
+    $time     = time();
+    $date     = gmdate('Ymd', $time);
+    $amzdate  = gmdate('Ymd\THis\Z', $time);
+
+    // collect url components
+    $path     = sprintf('/%s', ltrim($key, '/'));
+    $host     = "$this->bucket.s3";
+    $endpoint = str_replace('@host', $host, static::ENDPOINT_URL_TEMPLATE);
+
+    // prepare query parameters
+    $scope    = sprintf('%s/%s/s3/aws4_request', $date, $this->region);
+    $params   = array(
+      'X-Amz-Algorithm'     => 'AWS4-HMAC-SHA256',
+      'X-Amz-Credential'    => sprintf('%s/%s', $this->accessKey, $scope),
+      'X-Amz-Date'          => $amzdate,
+      'X-Amz-Expires'       => $ttl,
+      'X-Amz-SignedHeaders' => 'host'
+    );
+    $query    = http_build_query($params);
+
+    // generate request checksum
+    $request  = sprintf(
+      "GET\n%s\n%s\nhost:%s\n\nhost\nUNSIGNED-PAYLOAD",
+      $path, $query, parse_url($endpoint, PHP_URL_HOST)
+    );
+    $checksum = hash('sha256', $request);
+
+    // prepare signature
+    $string   = sprintf("AWS4-HMAC-SHA256\n%s\n%s\n%s", $amzdate, $scope, $checksum);
+    $key      = $this->keygen($date);
+
+    // calculate signature
+    $params['X-Amz-Signature'] = hash_hmac('sha256', $string, $key);
+
+    // assemble url
+    return sprintf('%s%s?%s', $endpoint, $path, http_build_query($params));
   }
 
 
@@ -347,16 +398,17 @@ class S4
     curl_setopt_array($handle, array_replace(
       array(
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+        CURLOPT_SSL_VERIFYPEER => 1,
         CURLOPT_FOLLOWLOCATION => true
       ),
       $options
     ));
 
     // perform request, gather response data
-    $result = curl_exec($handle);
-    $error = curl_error($handle);
-    $info = curl_getinfo($handle);
+    $result = curl_exec($handle) ?: null;
+    $error = curl_error($handle) ?: null;
+    $info = curl_getinfo($handle) ?: array();
 
     // close curl handle
     curl_close($handle);
