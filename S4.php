@@ -123,6 +123,7 @@ class S4
     $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
 
+    // analyze file (hash, length, mime type)
     if (is_file($file)) {
       $handle = fopen($file, 'r');
       $hash = hash_file('sha256', $file);
@@ -144,6 +145,7 @@ class S4
       fwrite($handle, $file, $length);
     }
 
+    // prepare headers
     rewind($handle);
     $cache = (0 === strpos($acl, 'public')) ? 'public' : 'private';
     $headers = array_replace(
@@ -157,14 +159,18 @@ class S4
       ),
       $headers
     );
+
+    // prepare curl options
     $options = array(
       CURLOPT_PUT             => true,
       CURLOPT_INFILE          => $handle,
       CURLOPT_INFILESIZE      => $length
     );
 
+    // execute curl request
     $result = $this->request('PUT', $path, $headers, $options);
 
+    // clean up
     fclose($handle);
     finfo_close($finfo);
 
@@ -181,6 +187,7 @@ class S4
   {
     $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
 
+    // prepare download target
     if (is_string($file)) {
       $handle = fopen($file, 'w+');
     }
@@ -193,8 +200,10 @@ class S4
     }
     $options = array(CURLOPT_FILE => $handle);
 
+    // perform curl request
     $result = $this->request('GET', $path, array(), $options);
 
+    // prepare result
     rewind($handle);
     if ($file) {
       $result['result'] = $handle;
