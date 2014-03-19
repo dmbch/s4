@@ -134,7 +134,8 @@ class S4
     }
     elseif (is_resource($file)) {
       $handle = $file;
-      $file = stream_get_meta_data($handle)['uri'];
+      $data = $file = stream_get_meta_data($handle);
+      $file = $data['uri'];
       $hash = hash_file('sha256', $file);
       $checksum = base64_encode(hash_file('md5', $file, true));
       $length = filesize($file);
