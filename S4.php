@@ -133,8 +133,9 @@ class S4
       $type = finfo_file($finfo, $file);
     }
     elseif (is_resource($file)) {
+      $meta = stream_get_meta_data($handle);
       $handle = $file;
-      $file = stream_get_meta_data($handle)['uri'];
+      $file = $meta['uri'];
       $hash = hash_file('sha256', $file);
       $checksum = base64_encode(hash_file('md5', $file, true));
       $length = filesize($file);
