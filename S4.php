@@ -199,7 +199,8 @@ class S4
     }
     elseif (is_resource($file)) {
       $handle = $file;
-      $file = stream_get_meta_data($handle)['uri'];
+      $meta = stream_get_meta_data($handle);
+      $file = $meta['uri'];
     }
     else {
       $handle = fopen('php://temp', 'w+');
