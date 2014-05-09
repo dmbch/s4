@@ -257,7 +257,10 @@ class S4
 
     $formatted = array();
     foreach ($headers as $key => $value) {
-      $formatted[] = "$key: $value";
+      // prevent duplicate content-length header
+      if ($key !== 'Content-Length') {
+        $formatted[] = "$key: $value";
+      }
     }
 
     $options = array_replace(
