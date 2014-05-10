@@ -122,33 +122,9 @@ class S4
   public function put($key, $file, $acl = self::ACL_PRIVATE, $redundancy = self::REDUNDANCY_STANDARD, $headers = array())
   {
     $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
-    $finfo = finfo_open(FILEINFO_MIME_TYPE);
 
-    // analyze file (hash, length, mime type)
-    if (is_string($file) && is_file($file)) {
-      $handle = fopen($file, 'r');
-      $hash = hash_file('sha256', $file);
-      $checksum = base64_encode(hash_file('md5', $file, true));
-      $length = filesize($file);
-      $type = finfo_file($finfo, $file);
-    }
-    elseif (is_resource($file)) {
-      $handle = $file;
-      $meta = stream_get_meta_data($handle);
-      $file = $meta['uri'];
-      $hash = hash_file('sha256', $file);
-      $checksum = base64_encode(hash_file('md5', $file, true));
-      $length = filesize($file);
-      $type = finfo_file($finfo, $file);
-    }
-    else {
-      $handle = fopen('php://temp', 'w+');
-      $hash = hash('sha256', $file);
-      $checksum = base64_encode(hash('md5', $file, true));
-      $length = strlen($file);
-      $type = 'text/plain';
-      fwrite($handle, $file, $length);
-    }
+    // @var handle, hash, checksum, length, type
+    extract($this->analyze($file));
 
     // prepare headers
     $cache = (0 === strpos($acl, 'public')) ? 'public' : 'private';
@@ -178,7 +154,6 @@ class S4
 
     // clean up
     fclose($handle);
-    finfo_close($finfo);
 
     return $result;
   }
@@ -277,6 +252,32 @@ class S4
 
 
   /**
+   * @param array $options
+   * @return array
+   */
+  public function index($options = array())
+  {
+    $query = array();
+    foreach ($options as $key => $value) {
+        $query[] = sprintf('%s=%s', $key, rawurlencode($value));
+    }
+    $path = sprintf('/%s?%s', $this->bucket, implode('&', $query));
+    $result = $this->request('GET', $path);
+
+    $keys = array();
+    if ($result['http_code'] === 200) {
+      $dom = new DOMDocument();
+      $dom->loadXML($result['result']);
+      foreach ($dom->getElementsByTagName('Key') as $key) {
+        array_push($keys, $key->nodeValue);
+      }
+    }
+
+    return $keys;
+  }
+
+
+  /**
    * http://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
    *
    * @param string $key
@@ -336,9 +337,12 @@ class S4
   protected function sign($method, $url, $headers)
   {
     // extract info from arguments
-    $date       = gmdate('Ymd', strtotime($headers['Date']));
-    $query      = parse_url($url, PHP_URL_QUERY);
     $path       = parse_url($url, PHP_URL_PATH);
+    $date       = gmdate('Ymd', strtotime($headers['Date']));
+    $query      = explode('&', parse_url($url, PHP_URL_QUERY));
+
+    sort($query);
+    $query = implode('&', $query);
 
     // process headers
     $canonical  = array();
@@ -387,6 +391,45 @@ class S4
     $signingKey = hash_hmac('sha256', $format,  $serviceKey,  true);
 
     return $signingKey;
+  }
+
+
+  /**
+   * @param mixed $file
+   * @return array
+   */
+  protected function analyze($file)
+  {
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+
+    if (is_string($file) && is_file($file)) {
+      $handle = fopen($file, 'r');
+      $hash = hash_file('sha256', $file);
+      $checksum = base64_encode(hash_file('md5', $file, true));
+      $length = filesize($file);
+      $type = finfo_file($finfo, $file);
+    }
+    elseif (is_resource($file)) {
+      $handle = $file;
+      $meta = stream_get_meta_data($handle);
+      $file = $meta['uri'];
+      $hash = hash_file('sha256', $file);
+      $checksum = base64_encode(hash_file('md5', $file, true));
+      $length = filesize($file);
+      $type = finfo_file($finfo, $file);
+    }
+    else {
+      $handle = fopen('php://temp', 'w+');
+      $hash = hash('sha256', $file);
+      $checksum = base64_encode(hash('md5', $file, true));
+      $length = strlen($file);
+      $type = 'text/plain';
+      fwrite($handle, $file, $length);
+    }
+
+    finfo_close($finfo);
+
+    return compact('handle', 'hash', 'checksum', 'length', 'type');
   }
 
 
