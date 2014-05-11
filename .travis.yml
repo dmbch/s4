@@ -1,0 +1,11 @@
+language: php
+php:
+- 5.2
+- 5.3
+- 5.4
+- 5.5
+script: phpunit S4Test.php
+env:
+  global:
+  - secure: 1FBjdIvp87e133cg9hHTaKXnySs9cfOjGfYC4WCCSa5Spo9EHK6MMFRk5Cb9SIknBHSD14xSwp/xx4WbBvsZtcliR62tWmuakOMDObcthCCXuydaHJ7uEIUHen6LziKtUwBCKR1IgsB/weQOuyP6Vh5PUYR88UvQXeGa90VwdsU=
+  - secure: mEprJH08u15nPzXnR8jKvaKm7Z0YY5OJ1YNkQ7AYX1JrADn2bKRPFFcr5CvkOTTXC719zh3Iqg5g3RLPXqOC04P2ImL/CMtKRTf7c4Ym3dHGpekPjclVI4r4hAxmaetiSg7RqeppO3ZDB8t0il0jcVA/LPp22mloFPMPQMXnFPU=
