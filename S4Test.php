@@ -42,7 +42,7 @@ class S4Test extends PHPUnit_Framework_TestCase
 
   protected function tearDown()
   {
-    $this->s4->del('');
+    $response = $this->s4->del('');
   }
 
 
@@ -58,7 +58,7 @@ class S4Test extends PHPUnit_Framework_TestCase
 
   public function testPut()
   {
-    $file = realpath('./README.md');
+    $file = realpath('./Readme.md');
     $handle = fopen($file, 'r');
     $string  = file_get_contents($file);
     fwrite($handle, $string, filesize($file));
@@ -90,7 +90,7 @@ class S4Test extends PHPUnit_Framework_TestCase
 
   public function testGet()
   {
-    $string = file_get_contents(realpath('./README.md'));
+    $string = file_get_contents(realpath('./Readme.md'));
     $file = tempnam(sys_get_temp_dir(), '');
     $handle = tmpfile();
 
@@ -116,7 +116,7 @@ class S4Test extends PHPUnit_Framework_TestCase
 
   public function testDel()
   {
-    $response = $this->s4->put(self::FILE_1, realpath('./README.md'));
+    $response = $this->s4->put(self::FILE_1, realpath('./Readme.md'));
     $this->assertEquals(200, $response['http_code']);
 
     $response = $this->s4->del(self::FILE_1);
@@ -130,14 +130,14 @@ class S4Test extends PHPUnit_Framework_TestCase
   public function testIndex()
   {
     $prefix = 'foo/';
-    $response = $this->s4->put(self::FILE_1, realpath('./README.md'));
+    $response = $this->s4->put(self::FILE_1, realpath('./Readme.md'));
     $this->assertEquals(200, $response['http_code']);
-    $response = $this->s4->put(self::FILE_2, realpath('./README.md'));
+    $response = $this->s4->put(self::FILE_2, realpath('./Readme.md'));
     $this->assertEquals(200, $response['http_code']);
 
-    $response = $this->s4->put($prefix. self::FILE_1, realpath('./README.md'));
+    $response = $this->s4->put($prefix. self::FILE_1, realpath('./Readme.md'));
     $this->assertEquals(200, $response['http_code']);
-    $response = $this->s4->put($prefix. self::FILE_2, realpath('./README.md'));
+    $response = $this->s4->put($prefix. self::FILE_2, realpath('./Readme.md'));
     $this->assertEquals(200, $response['http_code']);
 
     $response = $this->s4->index(array('max-keys' => 2));
@@ -159,7 +159,7 @@ class S4Test extends PHPUnit_Framework_TestCase
     */
   public function testPresign()
   {
-    $response = $this->s4->put(self::FILE_1, realpath('./README.md'));
+    $response = $this->s4->put(self::FILE_1, realpath('./Readme.md'));
     $this->assertEquals(200, $response['http_code']);
 
     $signed = $this->s4->presign(self::FILE_1);
