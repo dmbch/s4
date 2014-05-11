@@ -96,7 +96,8 @@ class S4Test extends PHPUnit_Framework_TestCase
   {
     $string = file_get_contents(realpath('./Readme.md'));
     $file = tempnam(sys_get_temp_dir(), '');
-    $handle = tmpfile();
+    $hfile = tempnam(sys_get_temp_dir(), '');
+    $handle = fopen($hfile, 'w+');
 
     $response = $this->s4->put(self::FILE_1, $string);
     $this->assertEquals(200, $response['http_code']);
@@ -115,6 +116,9 @@ class S4Test extends PHPUnit_Framework_TestCase
     $response = $this->s4->get(self::FILE_2, $handle);
     $this->assertEquals(200, $response['http_code']);
     $this->assertEquals($string, stream_get_contents($handle));
+
+    fclose($handle);
+    unlink($hfile);
   }
 
 

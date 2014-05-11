@@ -181,9 +181,9 @@ class S4
     $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
 
     // prepare download target
-    $close = true;
+    $closeHandle = true;
     if (is_resource($file)) {
-      $close = false;
+      $closeHandle = false;
       $handle = $file;
       $meta = stream_get_meta_data($handle);
       $file = $meta['uri'];
@@ -205,7 +205,7 @@ class S4
     $response['result'] = $file ?: stream_get_contents($handle);
 
     // handle handle
-    if ($close) {
+    if ($closeHandle) {
       fclose($handle);
     }
     else {
