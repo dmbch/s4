@@ -108,7 +108,7 @@ class S4
     $this->region = $region;
 
     $host = ($region === self::REGION_VIRGINIA) ? 's3' : "s3-$region";
-    $this->endpoint = str_replace('@host', $host, static::ENDPOINT_URL_TEMPLATE);
+    $this->endpoint = str_replace('@host', $host, self::ENDPOINT_URL_TEMPLATE);
   }
 
 
@@ -130,13 +130,13 @@ class S4
     $cache = (0 === strpos($acl, 'public')) ? 'public' : 'private';
     $headers = array_replace(
       array(
-        static::HEADER_ACL        => $acl,
-        static::HEADER_REDUNDANCY => $redundancy,
-        static::HEADER_SHA256     => $hash,
-        'Cache-Control'           => $cache,
-        'Content-MD5'             => $checksum,
-        'Content-Length'          => $length,
-        'Content-Type'            => $type
+        self::HEADER_ACL        => $acl,
+        self::HEADER_REDUNDANCY => $redundancy,
+        self::HEADER_SHA256     => $hash,
+        'Cache-Control'         => $cache,
+        'Content-MD5'           => $checksum,
+        'Content-Length'        => $length,
+        'Content-Type'          => $type
       ),
       $headers
     );
@@ -261,7 +261,7 @@ class S4
       array(
         'Date'                => gmdate('D, d M Y H:i:s \G\M\T'),
         'Host'                => parse_url($url, PHP_URL_HOST),
-        static::HEADER_SHA256 => hash('sha256', '')
+        self::HEADER_SHA256 => hash('sha256', '')
       ),
       $headers
     );
@@ -304,10 +304,10 @@ class S4
     // collect url components
     $path     = sprintf('/%s', ltrim($key, '/'));
     $host     = "$this->bucket.s3";
-    if ($this->region !== static::REGION_VIRGINIA) {
+    if ($this->region !== self::REGION_VIRGINIA) {
       $host  .= "-$this->region";
     }
-    $endpoint = str_replace('@host', $host, static::ENDPOINT_URL_TEMPLATE);
+    $endpoint = str_replace('@host', $host, self::ENDPOINT_URL_TEMPLATE);
 
     // prepare query parameters
     $scope    = sprintf('%s/%s/s3/aws4_request', gmdate('Ymd'), $this->region);
@@ -367,7 +367,7 @@ class S4
     // generate request checksum
     $request    = sprintf(
       "%s\n%s\n%s\n%s\n\n%s\n%s",
-      $method, $path, $query, $canonical, $signed, $headers[static::HEADER_SHA256]
+      $method, $path, $query, $canonical, $signed, $headers[self::HEADER_SHA256]
     );
     $checksum   = hash('sha256', $request);
 
