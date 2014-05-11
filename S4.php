@@ -298,6 +298,9 @@ class S4
     // collect url components
     $path     = sprintf('/%s', ltrim($key, '/'));
     $host     = "$this->bucket.s3";
+    if ($this->region !== static::REGION_VIRGINIA) {
+      $host  .= "-$this->region";
+    }
     $endpoint = str_replace('@host', $host, static::ENDPOINT_URL_TEMPLATE);
 
     // prepare query parameters
@@ -459,5 +462,21 @@ class S4
 
     // process response data
     return array_merge($info, compact('result', 'error'));
+  }
+
+
+  /**
+   * @return string
+   */
+  public static function uuid()
+  {
+    $data = openssl_random_pseudo_bytes(16);
+    $data[6] = chr(ord($data[6]) & 0x0f | 0x40);
+    $data[8] = chr(ord($data[8]) & 0x3f | 0x80);
+
+    return vsprintf(
+      '%s%s-%s-%s-%s-%s%s%s',
+      str_split(bin2hex($data), 4)
+    );
   }
 }

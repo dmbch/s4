@@ -4,31 +4,45 @@ require 'S4.php';
 
 class S4Test extends PHPUnit_Framework_TestCase
 {
-  const BUCKET_VIRGINIA = 's4-us-east-1';
-  const BUCKET_IRELAND = 's4-eu-west-1';
-
   const FILE_1 = 'file1.md';
   const FILE_2 = 'file2.md';
   const FILE_3 = 'file3.md';
-
-  protected static $bucket = self::BUCKET_IRELAND;
-  protected static $region = S4::REGION_IRELAND;
 
   protected $s4;
 
 
   protected function setUp()
   {
+    $region = getenv('S4_REGION') ?: S4::REGION_IRELAND;
+
+    if ($region === S4::REGION_VIRGINIA) {
+      $xml = '';
+    }
+    else {
+      $dom = new DOMDocument();
+      $config = $dom->createElementNS(
+        'http://s3.amazonaws.com/doc/2006-03-01/',
+        'CreateBucketConfiguration'
+      );
+      $location = $dom->createElement('LocationConstraint', $region);
+      $config->appendChild($location);
+      $dom->appendChild($config);
+      $xml = $dom->saveXML();
+    }
+
     $this->s4 = new S4(
       getenv('S4_ACCESS_KEY'),
       getenv('S4_SECRET_KEY'),
-      self::$bucket,
-      self::$region
+      S4::uuid(),
+      $region
     );
-    $response = $this->s4->index();
-    foreach ($response['result'] as $file) {
-      $this->s4->del($file['key']);
-    }
+    $response = $this->s4->put('', $xml);
+  }
+
+
+  protected function tearDown()
+  {
+    $this->s4->del('');
   }
 
 
@@ -140,22 +154,21 @@ class S4Test extends PHPUnit_Framework_TestCase
   }
 
 
-  // Stub test to switch to s3 us-east-1
-  public function testVirginia()
+  /**
+    * @expectedException ErrorException
+    */
+  public function testPresign()
   {
-    self::$bucket = self::BUCKET_VIRGINIA;
-    self::$region = S4::REGION_VIRGINIA;
+    $response = $this->s4->put(self::FILE_1, realpath('./README.md'));
+    $this->assertEquals(200, $response['http_code']);
 
-    $this->assertEmpty(null);
+    $signed = $this->s4->presign(self::FILE_1);
+    $unsigned = substr($signed, 0, strpos($signed, '?'));
+
+    $this->assertNotEmpty(file_get_contents($signed));
+    try {
+      $this->assertEmpty(file_get_contents($unsigned));
+    }
+    catch (Exception $e) { throw new ErrorException(); }
   }
-
-  public function testVConstruct() { $this->testConstruct(); }
-
-  public function testVPut() { $this->testPut(); }
-
-  public function testVGet() { $this->testGet(); }
-
-  public function testVDel() { $this->testDel(); }
-
-  public function testVIndex() { $this->testIndex(); }
 }
