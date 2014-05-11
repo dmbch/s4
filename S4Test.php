@@ -33,7 +33,7 @@ class S4Test extends PHPUnit_Framework_TestCase
     $this->s4 = new S4(
       getenv('S4_ACCESS_KEY'),
       getenv('S4_SECRET_KEY'),
-      's4test-'. S4::uuid(),
+      's4test-'. static::uuid(),
       $region
     );
     $response = $this->s4->put('', $xml);
@@ -47,6 +47,23 @@ class S4Test extends PHPUnit_Framework_TestCase
       $this->s4->del($file['key']);
     }
     $response = $this->s4->del('');
+  }
+
+
+  /**
+   * @return string
+   */
+  protected static function uuid()
+  {
+    $data = openssl_random_pseudo_bytes(16);
+
+    $data[6] = chr(ord($data[6]) & 0x0f | 0x40);
+    $data[8] = chr(ord($data[8]) & 0x3f | 0x80);
+
+    return vsprintf(
+      '%s%s-%s-%s-%s-%s%s%s',
+      str_split(bin2hex($data), 4)
+    );
   }
 
 
