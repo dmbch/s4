@@ -74,11 +74,11 @@ class S4Test extends PHPUnit_Framework_TestCase
     $response = $this->s4->put(self::FILE_3, $string);
     $this->assertEquals(200, $response['http_code']);
 
+    $keys = array();
     $response = $this->s4->index();
-    $keys = array_map(
-      function ($row) { return $row['key']; },
-      $response['result']
-    );
+    foreach ($response['result'] as $row) {
+      array_push($keys, $row['key']);
+    }
     $this->assertArrayHasKey(self::FILE_1, array_flip($keys));
     $this->assertArrayHasKey(self::FILE_2, array_flip($keys));
     $this->assertArrayHasKey(self::FILE_3, array_flip($keys));
