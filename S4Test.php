@@ -13,7 +13,7 @@ class S4Test extends PHPUnit_Framework_TestCase
 
   protected function setUp()
   {
-    $region = getenv('S4_REGION') ?: S4::REGION_IRELAND;
+    $region = getenv('S4_REGION') ? getenv('S4_REGION') : S4::REGION_IRELAND;
 
     if ($region === S4::REGION_VIRGINIA) {
       $xml = '';

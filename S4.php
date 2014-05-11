@@ -202,7 +202,7 @@ class S4
 
     // prepare result
     rewind($handle);
-    $response['result'] = $file ?: stream_get_contents($handle);
+    $response['result'] = $file ? $file : stream_get_contents($handle);
 
     // handle handle
     if ($closeHandle) {
@@ -459,9 +459,9 @@ class S4
     ));
 
     // perform request, gather response data
-    $result = curl_exec($handle) ?: null;
-    $error = curl_error($handle) ?: null;
-    $info = curl_getinfo($handle) ?: array();
+    $result = curl_exec($handle);
+    $error = curl_error($handle);
+    $info = curl_getinfo($handle);
 
     // close curl handle
     curl_close($handle);
