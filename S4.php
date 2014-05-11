@@ -204,7 +204,13 @@ class S4
     rewind($handle);
     $response['result'] = $file ?: stream_get_contents($handle);
 
-    if ($close) { fclose($handle); }
+    // handle handle
+    if ($close) {
+      fclose($handle);
+    }
+    else {
+      fflush($handle);
+    }
 
     return $response;
   }
