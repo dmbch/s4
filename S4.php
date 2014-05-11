@@ -150,12 +150,24 @@ class S4
     );
 
     // execute curl request
-    $result = $this->request('PUT', $path, $headers, $options);
+    $response = $this->request('PUT', $path, $headers, $options);
 
     // clean up
     fclose($handle);
 
-    return $result;
+    return $response;
+  }
+
+
+  /**
+   * @param string $key
+   * @return array
+   */
+  public function del($key)
+  {
+    $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
+
+    return $this->request('DELETE', $path);
   }
 
 
@@ -169,13 +181,15 @@ class S4
     $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
 
     // prepare download target
-    if (is_string($file)) {
-      $handle = fopen($file, 'w+');
-    }
-    elseif (is_resource($file)) {
+    $close = true;
+    if (is_resource($file)) {
+      $close = false;
       $handle = $file;
       $meta = stream_get_meta_data($handle);
       $file = $meta['uri'];
+    }
+    elseif (is_string($file)) {
+      $handle = fopen($file, 'w+');
     }
     else {
       $handle = fopen('php://temp', 'w+');
@@ -184,26 +198,44 @@ class S4
     $options = array(CURLOPT_FILE => $handle);
 
     // perform curl request
-    $result = $this->request('GET', $path, array(), $options);
+    $response = $this->request('GET', $path, array(), $options);
 
     // prepare result
     rewind($handle);
-    $result['result'] = $file ?: stream_get_contents($handle);
-    fclose($handle);
+    $response['result'] = $file ?: stream_get_contents($handle);
 
-    return $result;
+    if ($close) { fclose($handle); }
+
+    return $response;
   }
 
 
   /**
-   * @param string $key
+   * http://docs.aws.amazon.com/AmazonS3/latest/API/RESTBucketGET.html
+   * @param array $params
    * @return array
    */
-  public function delete($key)
+  public function index($params = array())
   {
-    $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
+    $path = sprintf('/%s?%s', $this->bucket, http_build_query($params));
+    $response = $this->request('GET', $path);
 
-    return $this->request('DELETE', $path);
+    if ($response['http_code'] === 200) {
+      $dom = new DOMDocument();
+      $dom->loadXML($response['result']);
+
+      $nodes = array();
+      foreach ($dom->getElementsByTagName('Contents') as $contents) {
+        $node = array();
+        foreach ($contents->childNodes as $child) {
+          $node[strtolower($child->nodeName)] = $child->nodeValue;
+        }
+        array_push($nodes, $node);
+      }
+      $response['result'] = $nodes;
+    }
+
+    return $response;
   }
 
 
@@ -252,32 +284,6 @@ class S4
 
 
   /**
-   * @param array $options
-   * @return array
-   */
-  public function index($options = array())
-  {
-    $query = array();
-    foreach ($options as $key => $value) {
-        $query[] = sprintf('%s=%s', $key, rawurlencode($value));
-    }
-    $path = sprintf('/%s?%s', $this->bucket, implode('&', $query));
-    $result = $this->request('GET', $path);
-
-    $keys = array();
-    if ($result['http_code'] === 200) {
-      $dom = new DOMDocument();
-      $dom->loadXML($result['result']);
-      foreach ($dom->getElementsByTagName('Key') as $key) {
-        array_push($keys, $key->nodeValue);
-      }
-    }
-
-    return $keys;
-  }
-
-
-  /**
    * http://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
    *
    * @param string $key
@@ -287,9 +293,7 @@ class S4
   public function presign($key, $ttl = 3600)
   {
     // generate date strings
-    $time     = time();
-    $date     = gmdate('Ymd', $time);
-    $amzdate  = gmdate('Ymd\THis\Z', $time);
+    $amzdate  = gmdate('Ymd\THis\Z');
 
     // collect url components
     $path     = sprintf('/%s', ltrim($key, '/'));
@@ -297,7 +301,7 @@ class S4
     $endpoint = str_replace('@host', $host, static::ENDPOINT_URL_TEMPLATE);
 
     // prepare query parameters
-    $scope    = sprintf('%s/%s/s3/aws4_request', $date, $this->region);
+    $scope    = sprintf('%s/%s/s3/aws4_request', gmdate('Ymd'), $this->region);
     $params   = array(
       'X-Amz-Algorithm'     => 'AWS4-HMAC-SHA256',
       'X-Amz-Credential'    => sprintf('%s/%s', $this->accessKey, $scope),
@@ -316,7 +320,7 @@ class S4
 
     // prepare signature
     $string   = sprintf("AWS4-HMAC-SHA256\n%s\n%s\n%s", $amzdate, $scope, $checksum);
-    $key      = $this->keygen($date);
+    $key      = $this->keygen();
 
     // calculate signature
     $params['X-Amz-Signature'] = hash_hmac('sha256', $string, $key);
@@ -338,7 +342,6 @@ class S4
   {
     // extract info from arguments
     $path       = parse_url($url, PHP_URL_PATH);
-    $date       = gmdate('Ymd', strtotime($headers['Date']));
     $query      = explode('&', parse_url($url, PHP_URL_QUERY));
 
     sort($query);
@@ -360,9 +363,9 @@ class S4
     $checksum   = hash('sha256', $request);
 
     // prepare signature
-    $scope      = sprintf('%s/%s/s3/aws4_request', $date, $this->region);
+    $scope      = sprintf('%s/%s/s3/aws4_request', gmdate('Ymd'), $this->region);
     $string     = sprintf("AWS4-HMAC-SHA256\n%s\n%s\n%s", $headers['Date'], $scope, $checksum);
-    $key        = $this->keygen($date);
+    $key        = $this->keygen();
 
     // calculate signature
     return sprintf(
@@ -373,22 +376,15 @@ class S4
 
 
   /**
-   * @param string $date
    * @return string
    */
-  protected function keygen($date)
+  protected function keygen()
   {
-    // gather ingredients
-    $region     = $this->region;
-    $service    = 's3';
-    $format     = 'aws4_request';
-
-    // mix up signing key
     $secretKey  = "AWS4$this->secretKey";
-    $dateKey    = hash_hmac('sha256', $date,    $secretKey,   true);
-    $regionKey  = hash_hmac('sha256', $region,  $dateKey,     true);
-    $serviceKey = hash_hmac('sha256', $service, $regionKey,   true);
-    $signingKey = hash_hmac('sha256', $format,  $serviceKey,  true);
+    $dateKey    = hash_hmac('sha256', gmdate('Ymd'),  $secretKey,   true);
+    $regionKey  = hash_hmac('sha256', $this->region,  $dateKey,     true);
+    $serviceKey = hash_hmac('sha256', 's3',           $regionKey,   true);
+    $signingKey = hash_hmac('sha256', 'aws4_request', $serviceKey,  true);
 
     return $signingKey;
   }
