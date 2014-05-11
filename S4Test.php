@@ -42,6 +42,10 @@ class S4Test extends PHPUnit_Framework_TestCase
 
   protected function tearDown()
   {
+    $response = $this->s4->index();
+    foreach ($response['result'] as $file) {
+      $this->s4->del($file['key']);
+    }
     $response = $this->s4->del('');
   }
 
