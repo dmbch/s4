@@ -107,8 +107,8 @@ class S4
     $this->bucket = $bucket;
     $this->region = $region;
 
-    $host = ($region === self::REGION_VIRGINIA) ? 's3' : "s3-$region";
-    $this->endpoint = str_replace('@host', $host, self::ENDPOINT_URL_TEMPLATE);
+    $host = ($region === static::REGION_VIRGINIA) ? 's3' : "s3-$region";
+    $this->endpoint = str_replace('@host', $host, static::ENDPOINT_URL_TEMPLATE);
   }
 
 
@@ -130,13 +130,13 @@ class S4
     $cache = (0 === strpos($acl, 'public')) ? 'public' : 'private';
     $headers = array_replace(
       array(
-        self::HEADER_ACL        => $acl,
-        self::HEADER_REDUNDANCY => $redundancy,
-        self::HEADER_SHA256     => $hash,
-        'Cache-Control'         => $cache,
-        'Content-MD5'           => $checksum,
-        'Content-Length'        => $length,
-        'Content-Type'          => $type
+        static::HEADER_ACL        => $acl,
+        static::HEADER_REDUNDANCY => $redundancy,
+        static::HEADER_SHA256     => $hash,
+        'Cache-Control'           => $cache,
+        'Content-MD5'             => $checksum,
+        'Content-Length'          => $length,
+        'Content-Type'            => $type
       ),
       $headers
     );
@@ -202,15 +202,10 @@ class S4
 
     // prepare result
     rewind($handle);
-    $response['result'] = $file ? $file : stream_get_contents($handle);
+    $response['result'] = $file ?: stream_get_contents($handle);
 
     // handle handle
-    if ($closeHandle) {
-      fclose($handle);
-    }
-    else {
-      fflush($handle);
-    }
+    if ($closeHandle) { fclose($handle); } else { fflush($handle); }
 
     return $response;
   }
@@ -261,7 +256,7 @@ class S4
       array(
         'Date'                => gmdate('D, d M Y H:i:s \G\M\T'),
         'Host'                => parse_url($url, PHP_URL_HOST),
-        self::HEADER_SHA256 => hash('sha256', '')
+        static::HEADER_SHA256 => hash('sha256', '')
       ),
       $headers
     );
@@ -304,10 +299,10 @@ class S4
     // collect url components
     $path     = sprintf('/%s', ltrim($key, '/'));
     $host     = "$this->bucket.s3";
-    if ($this->region !== self::REGION_VIRGINIA) {
+    if ($this->region !== static::REGION_VIRGINIA) {
       $host  .= "-$this->region";
     }
-    $endpoint = str_replace('@host', $host, self::ENDPOINT_URL_TEMPLATE);
+    $endpoint = str_replace('@host', $host, static::ENDPOINT_URL_TEMPLATE);
 
     // prepare query parameters
     $scope    = sprintf('%s/%s/s3/aws4_request', gmdate('Ymd'), $this->region);
@@ -367,7 +362,7 @@ class S4
     // generate request checksum
     $request    = sprintf(
       "%s\n%s\n%s\n%s\n\n%s\n%s",
-      $method, $path, $query, $canonical, $signed, $headers[self::HEADER_SHA256]
+      $method, $path, $query, $canonical, $signed, $headers[static::HEADER_SHA256]
     );
     $checksum   = hash('sha256', $request);
 
@@ -459,9 +454,9 @@ class S4
     ));
 
     // perform request, gather response data
-    $result = curl_exec($handle);
-    $error = curl_error($handle);
-    $info = curl_getinfo($handle);
+    $result = curl_exec($handle) ?: null;
+    $error = curl_error($handle) ?: null;
+    $info = curl_getinfo($handle) ?: array();
 
     // close curl handle
     curl_close($handle);
