@@ -42,7 +42,7 @@ class S4Test extends PHPUnit_Framework_TestCase
 
   protected function tearDown()
   {
-    $response = $this->s4->index();
+    $response = $this->s4->ls();
     foreach ($response['result'] as $file) {
       $this->s4->del($file['key']);
     }
@@ -71,7 +71,7 @@ class S4Test extends PHPUnit_Framework_TestCase
   {
     $this->assertInstanceOf('S4', $this->s4);
 
-    $response = $this->s4->index();
+    $response = $this->s4->ls();
     $this->assertEquals(200, $response['http_code']);
     $this->assertEmpty($response['result']);
   }
@@ -91,7 +91,7 @@ class S4Test extends PHPUnit_Framework_TestCase
     $response = $this->s4->put(self::FILE_3, $string);
     $this->assertEquals(200, $response['http_code']);
 
-    $response = $this->s4->index();
+    $response = $this->s4->ls();
     $keys = array_map(
       function ($row) { return $row['key']; },
       $response['result']
@@ -136,6 +136,7 @@ class S4Test extends PHPUnit_Framework_TestCase
 
     fclose($handle); // tmpfile is buggy under hhvm
     unlink($hfile);
+    unlink($file);
   }
 
 
@@ -147,12 +148,12 @@ class S4Test extends PHPUnit_Framework_TestCase
     $response = $this->s4->del(self::FILE_1);
     $this->assertEquals(204, $response['http_code']);
 
-    $response = $this->s4->index();
+    $response = $this->s4->ls();
     $this->assertEmpty($response['result']);
   }
 
 
-  public function testIndex()
+  public function testLs()
   {
     $prefix = 'foo/';
     $response = $this->s4->put(self::FILE_1, realpath('./Readme.md'));
@@ -165,15 +166,15 @@ class S4Test extends PHPUnit_Framework_TestCase
     $response = $this->s4->put($prefix. self::FILE_2, realpath('./Readme.md'));
     $this->assertEquals(200, $response['http_code']);
 
-    $response = $this->s4->index(array('max-keys' => 2));
+    $response = $this->s4->ls(array('max-keys' => 2));
     $this->assertEquals(200, $response['http_code']);
     $this->assertEquals(2, count($response['result']));
 
-    $response = $this->s4->index(array('marker' => self::FILE_2));
+    $response = $this->s4->ls(array('marker' => self::FILE_2));
     $this->assertEquals(200, $response['http_code']);
     $this->assertEquals(2, count($response['result']));
 
-    $response = $this->s4->index(array('prefix' => $prefix));
+    $response = $this->s4->ls(array('prefix' => $prefix));
     $this->assertEquals(200, $response['http_code']);
     $this->assertEquals(2, count($response['result']));
   }
@@ -182,12 +183,12 @@ class S4Test extends PHPUnit_Framework_TestCase
   /**
     * @expectedException ErrorException
     */
-  public function testPresign()
+  public function testUrl()
   {
     $response = $this->s4->put(self::FILE_1, realpath('./Readme.md'));
     $this->assertEquals(200, $response['http_code']);
 
-    $signed = $this->s4->presign(self::FILE_1);
+    $signed = $this->s4->url(self::FILE_1);
     $unsigned = substr($signed, 0, strpos($signed, '?'));
 
     $this->assertNotEmpty(file_get_contents($signed));

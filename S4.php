@@ -99,6 +99,7 @@ class S4
    * @param string $secretKey
    * @param string $bucket
    * @param string $region (optional)
+   * @param S4
    */
   public function __construct($accessKey, $secretKey, $bucket, $region = self::REGION_VIRGINIA)
   {
@@ -118,13 +119,14 @@ class S4
    * @param string $acl (optional)
    * @param string $redundancy (optional)
    * @param array $headers (optional)
+   * @return array
    */
   public function put($key, $file, $acl = self::ACL_PRIVATE, $redundancy = self::REDUNDANCY_STANDARD, $headers = array())
   {
     $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
 
     // @var handle, hash, checksum, length, type
-    extract($this->analyze($file));
+    extract($this->process($file));
 
     // prepare headers
     $cache = (0 === strpos($acl, 'public')) ? 'public' : 'private';
@@ -133,10 +135,10 @@ class S4
         static::HEADER_ACL        => $acl,
         static::HEADER_REDUNDANCY => $redundancy,
         static::HEADER_SHA256     => $hash,
-        'Cache-Control'           => $cache,
         'Content-MD5'             => $checksum,
         'Content-Length'          => $length,
-        'Content-Type'            => $type
+        'Content-Type'            => $type,
+        'Cache-Control'           => $cache
       ),
       $headers
     );
@@ -156,18 +158,6 @@ class S4
     fclose($handle);
 
     return $response;
-  }
-
-
-  /**
-   * @param string $key
-   * @return array
-   */
-  public function del($key)
-  {
-    $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
-
-    return $this->request('DELETE', $path);
   }
 
 
@@ -212,11 +202,23 @@ class S4
 
 
   /**
+   * @param string $key
+   * @return array
+   */
+  public function del($key)
+  {
+    $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
+
+    return $this->request('DELETE', $path);
+  }
+
+
+  /**
    * http://docs.aws.amazon.com/AmazonS3/latest/API/RESTBucketGET.html
    * @param array $params
    * @return array
    */
-  public function index($params = array())
+  public function ls($params = array())
   {
     $path = sprintf('/%s?%s', $this->bucket, http_build_query($params));
     $response = $this->request('GET', $path);
@@ -241,59 +243,16 @@ class S4
 
 
   /**
-   * @param string $method (optional)
-   * @param string $path (optional)
-   * @param array $headers (optional)
-   * @param array $options (optional)
-   * @return array
-   */
-  public function request($method = 'GET', $path = '/', $headers = array(), $options = array())
-  {
-    $path = sprintf('/%s', ltrim($path, '/'));
-    $url = sprintf('%s%s', $this->endpoint, $path);
-
-    $headers = array_replace(
-      array(
-        'Date'                => gmdate('D, d M Y H:i:s \G\M\T'),
-        'Host'                => parse_url($url, PHP_URL_HOST),
-        static::HEADER_SHA256 => hash('sha256', '')
-      ),
-      $headers
-    );
-    ksort($headers);
-    $headers['Authorization'] = $this->sign($method, $url, $headers);
-
-    $formatted = array();
-    foreach ($headers as $key => $value) {
-      // prevent duplicate content-length header
-      if ($key !== 'Content-Length') {
-        $formatted[] = "$key: $value";
-      }
-    }
-
-    $options = array_replace(
-      array(
-        CURLOPT_URL           => $url,
-        CURLOPT_CUSTOMREQUEST => $method,
-        CURLOPT_HTTPHEADER    => $formatted
-      ),
-      $options
-    );
-
-    return $this->curl($options);
-  }
-
-
-  /**
    * http://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
    *
    * @param string $key
    * @param int $ttl
+   * @param string $method
    * @return string
    */
-  public function presign($key, $ttl = 3600)
+  public function url($key, $ttl = 3600, $method = 'GET')
   {
-    // generate date strings
+    // generate date string
     $amzdate  = gmdate('Ymd\THis\Z');
 
     // collect url components
@@ -317,8 +276,8 @@ class S4
 
     // generate request checksum
     $request  = sprintf(
-      "GET\n%s\n%s\nhost:%s\n\nhost\nUNSIGNED-PAYLOAD",
-      $path, $query, parse_url($endpoint, PHP_URL_HOST)
+      "%s\n%s\n%s\nhost:%s\n\nhost\nUNSIGNED-PAYLOAD",
+      $method, $path, $query, parse_url($endpoint, PHP_URL_HOST)
     );
     $checksum = hash('sha256', $request);
 
@@ -398,7 +357,7 @@ class S4
    * @param mixed $file
    * @return array
    */
-  protected function analyze($file)
+  protected function process($file)
   {
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
 
@@ -434,21 +393,60 @@ class S4
 
 
   /**
+   * @param string $method (optional)
+   * @param string $path (optional)
+   * @param array $headers (optional)
+   * @param array $options (optional)
+   * @return array
+   */
+  protected function request($method = 'GET', $path = '/', $headers = array(), $options = array())
+  {
+    $path = sprintf('/%s', ltrim($path, '/'));
+    $url = sprintf('%s%s', $this->endpoint, $path);
+
+    $headers = array_replace(
+      array(
+        'Date'                => gmdate('D, d M Y H:i:s \G\M\T'),
+        'Host'                => parse_url($url, PHP_URL_HOST),
+        static::HEADER_SHA256 => hash('sha256', '')
+      ),
+      $headers
+    );
+    ksort($headers);
+    $headers['Authorization'] = $this->sign($method, $url, $headers);
+
+    $formatted = array();
+    foreach ($headers as $key => $value) {
+      // prevent duplicate content-length header, i.e. let curl handle it
+      if ($key !== 'Content-Length') {
+        $formatted[] = "$key: $value";
+      }
+    }
+
+    return $this->curl($method, $url, $formatted, $options);
+  }
+
+
+  /**
+   * @param string $url
+   * @param string $method
+   * @param string $headers
    * @param array $options
    * @return array
    */
-  protected function curl($options)
+  protected function curl($method, $url, $headers, $options)
   {
-    // obtain curl handle
+    // obtain and configure curl handle
     $handle = curl_init();
 
     // configure curl
     curl_setopt_array($handle, array_replace(
       array(
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_SSL_VERIFYHOST => 2,
-        CURLOPT_SSL_VERIFYPEER => 1,
-        CURLOPT_FOLLOWLOCATION => true
+        CURLOPT_URL             => $url,
+        CURLOPT_CUSTOMREQUEST   => $method,
+        CURLOPT_HTTPHEADER      => $headers,
+        CURLOPT_RETURNTRANSFER  => true,
+        CURLOPT_FOLLOWLOCATION  => true
       ),
       $options
     ));
