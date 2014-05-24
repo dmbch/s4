@@ -116,12 +116,12 @@ class S4
   /**
    * @param string $key
    * @param mixed $file
+   * @param array $headers (optional)
    * @param string $acl (optional)
    * @param string $redundancy (optional)
-   * @param array $headers (optional)
    * @return array
    */
-  public function put($key, $file, $acl = self::ACL_PRIVATE, $redundancy = self::REDUNDANCY_STANDARD, $headers = array())
+  public function put($key, $file, $headers = array(), $acl = self::ACL_PRIVATE, $redundancy = self::REDUNDANCY_STANDARD)
   {
     $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
 
