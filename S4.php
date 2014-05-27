@@ -124,6 +124,7 @@ class S4
   public function put($key, $file, $headers = array(), $acl = self::ACL_PRIVATE, $redundancy = self::REDUNDANCY_STANDARD)
   {
     $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
+    $closeHandle = !is_resource($file);
 
     // @var handle, hash, checksum, length, type
     extract($this->process($file));
@@ -154,8 +155,8 @@ class S4
     // execute curl request
     $response = $this->request('PUT', $path, $headers, $options);
 
-    // clean up
-    fclose($handle);
+    // handle handle
+    if ($closeHandle) { fclose($handle); }
 
     return $response;
   }
