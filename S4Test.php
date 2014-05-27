@@ -183,12 +183,12 @@ class S4Test extends PHPUnit_Framework_TestCase
   /**
     * @expectedException ErrorException
     */
-  public function testUrl()
+  public function testTmpurl()
   {
     $response = $this->s4->put(self::FILE_1, realpath('./Readme.md'));
     $this->assertEquals(200, $response['http_code']);
 
-    $signed = $this->s4->url(self::FILE_1);
+    $signed = $this->s4->tmpurl(self::FILE_1);
     $unsigned = substr($signed, 0, strpos($signed, '?'));
 
     $this->assertNotEmpty(file_get_contents($signed));
