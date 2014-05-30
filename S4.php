@@ -360,14 +360,12 @@ class S4
    */
   protected function process($file)
   {
-    $finfo = finfo_open(FILEINFO_MIME_TYPE);
-
     if (is_string($file) && is_file($file)) {
       $handle = fopen($file, 'r');
       $hash = hash_file('sha256', $file);
       $checksum = base64_encode(hash_file('md5', $file, true));
       $length = filesize($file);
-      $type = finfo_file($finfo, $file);
+      $type = $this->mime($file);
     }
     elseif (is_resource($file)) {
       $handle = $file;
@@ -376,7 +374,7 @@ class S4
       $hash = hash_file('sha256', $file);
       $checksum = base64_encode(hash_file('md5', $file, true));
       $length = filesize($file);
-      $type = finfo_file($finfo, $file);
+      $type = $this->mime($file);
     }
     else {
       $handle = fopen('php://temp', 'w+');
@@ -386,10 +384,25 @@ class S4
       $type = 'text/plain';
       fwrite($handle, $file, $length);
     }
-
-    finfo_close($finfo);
-
     return compact('handle', 'hash', 'checksum', 'length', 'type');
+  }
+
+
+  /**
+   * @param string $file
+   * @return string
+   */
+  protected function mime($file)
+  {
+    if (function_exists('finfo_open')) {
+      $finfo = finfo_open(FILEINFO_MIME_TYPE);
+      $type = finfo_file($finfo, $file);
+      finfo_close($finfo);
+    }
+    else {
+      $type = mime_content_type($file);
+    }
+    return $type;
   }
 
 
