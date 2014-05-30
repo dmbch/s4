@@ -13,7 +13,7 @@ class S4Test extends PHPUnit_Framework_TestCase
 
   protected function setUp()
   {
-    $region = getenv('S4_REGION') ? getenv('S4_REGION') : S4::REGION_IRELAND;
+    $region = getenv('S4_REGION') ?: S4::REGION_IRELAND;
 
     if ($region === S4::REGION_VIRGINIA) {
       $xml = '';
@@ -33,7 +33,7 @@ class S4Test extends PHPUnit_Framework_TestCase
     $this->s4 = new S4(
       getenv('S4_ACCESS_KEY'),
       getenv('S4_SECRET_KEY'),
-      's4test-'. self::uuid(),
+      's4test-'. static::uuid(),
       $region
     );
     $response = $this->s4->put('', $xml);
@@ -55,9 +55,7 @@ class S4Test extends PHPUnit_Framework_TestCase
    */
   protected static function uuid()
   {
-    $handle = fopen('/dev/urandom', 'rb');
-    $data = fread($handle, 16);
-    fclose($handle);
+    $data = openssl_random_pseudo_bytes(16);
 
     $data[6] = chr(ord($data[6]) & 0x0f | 0x40);
     $data[8] = chr(ord($data[8]) & 0x3f | 0x80);
@@ -93,11 +91,11 @@ class S4Test extends PHPUnit_Framework_TestCase
     $response = $this->s4->put(self::FILE_3, $string);
     $this->assertEquals(200, $response['http_code']);
 
-    $keys = array();
     $response = $this->s4->ls();
-    foreach ($response['result'] as $row) {
-      $keys[] = $row['key'];
-    }
+    $keys = array_map(
+      function ($row) { return $row['key']; },
+      $response['result']
+    );
     $this->assertArrayHasKey(self::FILE_1, array_flip($keys));
     $this->assertArrayHasKey(self::FILE_2, array_flip($keys));
     $this->assertArrayHasKey(self::FILE_3, array_flip($keys));

@@ -108,8 +108,8 @@ class S4
     $this->bucket = $bucket;
     $this->region = $region;
 
-    $host = ($region === self::REGION_VIRGINIA) ? 's3' : "s3-$region";
-    $this->endpoint = str_replace('@host', $host, self::ENDPOINT_URL_TEMPLATE);
+    $host = ($region === static::REGION_VIRGINIA) ? 's3' : "s3-$region";
+    $this->endpoint = str_replace('@host', $host, static::ENDPOINT_URL_TEMPLATE);
   }
 
 
@@ -131,11 +131,11 @@ class S4
 
     // prepare headers
     $cache = (0 === strpos($acl, 'public')) ? 'public' : 'private';
-    $headers = array_merge(
+    $headers = array_replace(
       array(
-        self::HEADER_ACL          => $acl,
-        self::HEADER_REDUNDANCY   => $redundancy,
-        self::HEADER_SHA256       => $hash,
+        static::HEADER_ACL        => $acl,
+        static::HEADER_REDUNDANCY => $redundancy,
+        static::HEADER_SHA256     => $hash,
         'Content-MD5'             => $checksum,
         'Content-Length'          => $length,
         'Content-Type'            => $type,
@@ -193,7 +193,7 @@ class S4
 
     // prepare result
     rewind($handle);
-    $response['result'] = $file ? $file : stream_get_contents($handle);
+    $response['result'] = $file ?: stream_get_contents($handle);
 
     // handle handle
     if ($closeHandle) { fclose($handle); } else { fflush($handle); }
@@ -253,8 +253,10 @@ class S4
    */
   public function tmpurl($key, $ttl = 3600, $method = 'GET')
   {
-    // prepare url parameters
+    // generate date string
     $date = gmdate('Ymd\THis\Z');
+
+    // prepare url parameters
     $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
     $scope = sprintf('%s/%s/s3/aws4_request', gmdate('Ymd'), $this->region);
     $params = array(
@@ -316,7 +318,7 @@ class S4
     }
     $headerList = rtrim(vsprintf($format, $args), "\n");
     $keyList = implode(';', $keys);
-    $hash = $headers[self::HEADER_SHA256];
+    $hash = $headers[static::HEADER_SHA256];
     $date = $headers['Date'];
 
     // generate request checksum
@@ -360,12 +362,14 @@ class S4
    */
   protected function process($file)
   {
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+
     if (is_string($file) && is_file($file)) {
       $handle = fopen($file, 'r');
       $hash = hash_file('sha256', $file);
       $checksum = base64_encode(hash_file('md5', $file, true));
       $length = filesize($file);
-      $type = $this->mime($file);
+      $type = finfo_file($finfo, $file);
     }
     elseif (is_resource($file)) {
       $handle = $file;
@@ -374,7 +378,7 @@ class S4
       $hash = hash_file('sha256', $file);
       $checksum = base64_encode(hash_file('md5', $file, true));
       $length = filesize($file);
-      $type = $this->mime($file);
+      $type = finfo_file($finfo, $file);
     }
     else {
       $handle = fopen('php://temp', 'w+');
@@ -384,25 +388,10 @@ class S4
       $type = 'text/plain';
       fwrite($handle, $file, $length);
     }
+
+    finfo_close($finfo);
+
     return compact('handle', 'hash', 'checksum', 'length', 'type');
-  }
-
-
-  /**
-   * @param string $file
-   * @return string
-   */
-  protected function mime($file)
-  {
-    if (function_exists('finfo_open')) {
-      $finfo = finfo_open(FILEINFO_MIME_TYPE);
-      $type = finfo_file($finfo, $file);
-      finfo_close($finfo);
-    }
-    else {
-      $type = mime_content_type($file);
-    }
-    return $type;
   }
 
 
@@ -418,11 +407,11 @@ class S4
     $path = sprintf('/%s', ltrim($path, '/'));
     $url = sprintf('%s%s', $this->endpoint, $path);
 
-    $headers = array_merge(
+    $headers = array_replace(
       array(
         'Date' => gmdate('D, d M Y H:i:s \G\M\T'),
         'Host' => parse_url($url, PHP_URL_HOST),
-        self::HEADER_SHA256 => hash('sha256', '')
+        static::HEADER_SHA256 => hash('sha256', '')
       ),
       $headers
     );
@@ -454,7 +443,7 @@ class S4
     $handle = curl_init();
 
     // configure curl
-    curl_setopt_array($handle, array_merge(
+    curl_setopt_array($handle, array_replace(
       array(
         CURLOPT_URL             => $url,
         CURLOPT_CUSTOMREQUEST   => $method,
@@ -466,14 +455,14 @@ class S4
     ));
 
     // perform request, gather response data
-    $result = curl_exec($handle);
-    $error = curl_error($handle);
-    $info = curl_getinfo($handle);
+    $result = curl_exec($handle) ?: null;
+    $error = curl_error($handle) ?: null;
+    $info = curl_getinfo($handle) ?: array();
 
     // close curl handle
     curl_close($handle);
 
     // process response data
-    return array_merge($info ? $info : array(), compact('result', 'error'));
+    return array_merge($info, compact('result', 'error'));
   }
 }
