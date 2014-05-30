@@ -33,7 +33,7 @@ class S4Test extends PHPUnit_Framework_TestCase
     $this->s4 = new S4(
       getenv('S4_ACCESS_KEY'),
       getenv('S4_SECRET_KEY'),
-      's4test-'. static::uuid(),
+      's4test-'. self::uuid(),
       $region
     );
     $response = $this->s4->put('', $xml);
