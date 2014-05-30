@@ -124,19 +124,37 @@ class S4
   public function put($key, $file, $headers = array(), $acl = self::ACL_PRIVATE, $redundancy = self::REDUNDANCY_STANDARD)
   {
     $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
-    $closeHandle = !is_resource($file);
+    $cache = (0 === strpos($acl, 'public')) ? 'public' : 'private';
 
-    // @var handle, hash, checksum, length, type
-    extract($this->process($file));
+    // analyze file data
+    if (!$closeHandle = !is_resource($file)) {
+      $handle = $file;
+      $meta = stream_get_meta_data($handle);
+      $file = $meta['uri'];
+      $hash = hash_file('sha256', $file);
+      $length = filesize($file);
+      $type = static::finfo($file);
+    }
+    elseif (is_string($file) && is_file($file)) {
+      $handle = fopen($file, 'r');
+      $hash = hash_file('sha256', $file);
+      $length = filesize($file);
+      $type = static::finfo($file);
+    }
+    else {
+      $handle = fopen('php://temp', 'w+');
+      $hash = hash('sha256', $file);
+      $length = strlen($file);
+      $type = 'text/plain';
+      fwrite($handle, $file, $length);
+    }
 
     // prepare headers
-    $cache = (0 === strpos($acl, 'public')) ? 'public' : 'private';
     $headers = array_replace(
       array(
         static::HEADER_ACL        => $acl,
         static::HEADER_REDUNDANCY => $redundancy,
         static::HEADER_SHA256     => $hash,
-        'Content-MD5'             => $checksum,
         'Content-Length'          => $length,
         'Content-Type'            => $type,
         'Cache-Control'           => $cache
@@ -172,9 +190,7 @@ class S4
     $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
 
     // prepare download target
-    $closeHandle = true;
-    if (is_resource($file)) {
-      $closeHandle = false;
+    if (!$closeHandle = !is_resource($file)) {
       $handle = $file;
       $meta = stream_get_meta_data($handle);
       $file = $meta['uri'];
@@ -216,6 +232,7 @@ class S4
 
   /**
    * http://docs.aws.amazon.com/AmazonS3/latest/API/RESTBucketGET.html
+   *
    * @param array $params
    * @return array
    */
@@ -251,7 +268,7 @@ class S4
    * @param string $method
    * @return string
    */
-  public function tmpurl($key, $ttl = 3600, $method = 'GET')
+  public function url($key, $ttl = 3600, $method = 'GET')
   {
     // generate date string
     $date = gmdate('Ymd\THis\Z');
@@ -274,13 +291,10 @@ class S4
       "%s\n%s\n%s\nhost:%s\n\nhost\nUNSIGNED-PAYLOAD",
       $method, $path, $query, $host
     );
-    $checksum = hash('sha256', $request);
+    $hash = hash('sha256', $request);
 
     // prepare signature
-    $string = sprintf(
-      "AWS4-HMAC-SHA256\n%s\n%s\n%s",
-      $date, $scope, $checksum
-    );
+    $string = sprintf("AWS4-HMAC-SHA256\n%s\n%s\n%s", $date, $scope, $hash);
 
     // calculate signature
     $params['X-Amz-Signature'] = hash_hmac('sha256', $string, $this->keygen());
@@ -293,6 +307,7 @@ class S4
   /**
    * http://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
    *
+   * @internal
    * @param string $method
    * @param string $url
    * @param array $headers
@@ -318,19 +333,19 @@ class S4
     }
     $headerList = rtrim(vsprintf($format, $args), "\n");
     $keyList = implode(';', $keys);
-    $hash = $headers[static::HEADER_SHA256];
+    $bodyHash = $headers[static::HEADER_SHA256];
     $date = $headers['Date'];
 
     // generate request checksum
     $request = sprintf(
       "%s\n%s\n%s\n%s\n\n%s\n%s",
-      $method, $path, $query, $headerList, $keyList, $hash
+      $method, $path, $query, $headerList, $keyList, $bodyHash
     );
-    $checksum = hash('sha256', $request);
+    $reqHash = hash('sha256', $request);
 
     // prepare signature
     $scope = sprintf('%s/%s/s3/aws4_request', gmdate('Ymd'), $this->region);
-    $string = sprintf("AWS4-HMAC-SHA256\n%s\n%s\n%s", $date, $scope, $checksum);
+    $string = sprintf("AWS4-HMAC-SHA256\n%s\n%s\n%s", $date, $scope, $reqHash);
     $signature = hash_hmac('sha256', $string, $this->keygen());
 
     // calculate signature
@@ -342,6 +357,7 @@ class S4
 
 
   /**
+   * @internal
    * @return string
    */
   protected function keygen()
@@ -357,45 +373,7 @@ class S4
 
 
   /**
-   * @param mixed $file
-   * @return array
-   */
-  protected function process($file)
-  {
-    $finfo = finfo_open(FILEINFO_MIME_TYPE);
-
-    if (is_string($file) && is_file($file)) {
-      $handle = fopen($file, 'r');
-      $hash = hash_file('sha256', $file);
-      $checksum = base64_encode(hash_file('md5', $file, true));
-      $length = filesize($file);
-      $type = finfo_file($finfo, $file);
-    }
-    elseif (is_resource($file)) {
-      $handle = $file;
-      $meta = stream_get_meta_data($handle);
-      $file = $meta['uri'];
-      $hash = hash_file('sha256', $file);
-      $checksum = base64_encode(hash_file('md5', $file, true));
-      $length = filesize($file);
-      $type = finfo_file($finfo, $file);
-    }
-    else {
-      $handle = fopen('php://temp', 'w+');
-      $hash = hash('sha256', $file);
-      $checksum = base64_encode(hash('md5', $file, true));
-      $length = strlen($file);
-      $type = 'text/plain';
-      fwrite($handle, $file, $length);
-    }
-
-    finfo_close($finfo);
-
-    return compact('handle', 'hash', 'checksum', 'length', 'type');
-  }
-
-
-  /**
+   * @internal
    * @param string $method (optional)
    * @param string $path (optional)
    * @param array $headers (optional)
@@ -404,9 +382,10 @@ class S4
    */
   protected function request($method = 'GET', $path = '/', $headers = array(), $options = array())
   {
-    $path = sprintf('/%s', ltrim($path, '/'));
-    $url = sprintf('%s%s', $this->endpoint, $path);
+    // build url using path and endpoint
+    $url = sprintf('%s/%s', $this->endpoint, ltrim($path, '/'));
 
+    // assemble headers
     $headers = array_replace(
       array(
         'Date' => gmdate('D, d M Y H:i:s \G\M\T'),
@@ -418,26 +397,29 @@ class S4
     ksort($headers);
     $headers['Authorization'] = $this->sign($method, $url, $headers);
 
-    $formatted = array();
+    // format headers
+    $curlHeaders = array();
     foreach ($headers as $key => $value) {
       // prevent duplicate content-length header, i.e. let curl handle it
       if ($key !== 'Content-Length') {
-        $formatted[] = "$key: $value";
+        $curlHeaders[] = "$key: $value";
       }
     }
 
-    return $this->curl($method, $url, $formatted, $options);
+    // perform curl request
+    return static::curl($method, $url, $curlHeaders, $options);
   }
 
 
   /**
+   * @internal
    * @param string $url
    * @param string $method
    * @param string $headers
    * @param array $options
    * @return array
    */
-  protected function curl($method, $url, $headers, $options)
+  protected static function curl($method, $url, $headers, $options)
   {
     // obtain and configure curl handle
     $handle = curl_init();
@@ -464,5 +446,20 @@ class S4
 
     // process response data
     return array_merge($info, compact('result', 'error'));
+  }
+
+
+  /**
+   * @internal
+   * @param string $file
+   * @param int $options
+   */
+  protected static function finfo($file, $options = FILEINFO_MIME_TYPE)
+  {
+    $finfo = finfo_open($options);
+    $result = finfo_file($finfo, $file);
+    finfo_close($finfo);
+
+    return $result;
   }
 }
