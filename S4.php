@@ -123,9 +123,6 @@ class S4
    */
   public function put($key, $file, $headers = array(), $acl = self::ACL_PRIVATE, $redundancy = self::REDUNDANCY_STANDARD)
   {
-    $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
-    $cache = (0 === strpos($acl, 'public')) ? 'public' : 'private';
-
     // analyze file data
     if (!$closeHandle = !is_resource($file)) {
       $handle = $file;
@@ -150,6 +147,7 @@ class S4
     }
 
     // prepare headers
+    $cache = (0 === strpos($acl, 'public')) ? 'public' : 'private';
     $headers = array_replace(
       array(
         static::HEADER_ACL        => $acl,
@@ -171,7 +169,7 @@ class S4
     );
 
     // execute curl request
-    $response = $this->request('PUT', $path, $headers, $options);
+    $response = $this->req($key, 'PUT', $headers, $options);
 
     // handle handle
     if ($closeHandle) { fclose($handle); }
@@ -187,8 +185,6 @@ class S4
    */
   public function get($key, $file = null)
   {
-    $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
-
     // prepare download target
     if (!$closeHandle = !is_resource($file)) {
       $handle = $file;
@@ -205,7 +201,7 @@ class S4
     $options = array(CURLOPT_FILE => $handle);
 
     // perform curl request
-    $response = $this->request('GET', $path, array(), $options);
+    $response = $this->req($key, 'GET', array(), $options);
 
     // prepare result
     rewind($handle);
@@ -224,9 +220,7 @@ class S4
    */
   public function del($key)
   {
-    $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
-
-    return $this->request('DELETE', $path);
+    return $this->req($key, 'DELETE');
   }
 
 
@@ -238,8 +232,7 @@ class S4
    */
   public function ls($params = array())
   {
-    $path = sprintf('/%s?%s', $this->bucket, http_build_query($params));
-    $response = $this->request('GET', $path);
+    $response = $this->req(sprintf('?%s', http_build_query($params)));
 
     if ($response['http_code'] === 200) {
       $dom = new DOMDocument();
@@ -257,6 +250,45 @@ class S4
     }
 
     return $response;
+  }
+
+
+  /**
+   * @internal
+   * @param string $key (optional)
+   * @param string $method (optional)
+   * @param array $headers (optional)
+   * @param array $options (optional)
+   * @return array
+   */
+  public function req($key = '/', $method = 'GET', $headers = array(), $options = array())
+  {
+    // build url using path and endpoint
+    $url = sprintf('%s/%s/%s', $this->endpoint, $this->bucket, ltrim($key, '/'));
+
+    // assemble headers
+    $headers = array_replace(
+      array(
+        'Date' => gmdate('D, d M Y H:i:s \G\M\T'),
+        'Host' => parse_url($url, PHP_URL_HOST),
+        static::HEADER_SHA256 => hash('sha256', '')
+      ),
+      $headers
+    );
+    ksort($headers);
+    $headers['Authorization'] = $this->sign($method, $url, $headers);
+
+    // format headers
+    $curlHeaders = array();
+    foreach ($headers as $key => $value) {
+      // prevent duplicate content-length header, i.e. let curl handle it
+      if ($key !== 'Content-Length') {
+        $curlHeaders[] = "$key: $value";
+      }
+    }
+
+    // perform curl request
+    return static::curl($method, $url, $curlHeaders, $options);
   }
 
 
@@ -369,45 +401,6 @@ class S4
     $signingKey = hash_hmac('sha256', 'aws4_request', $serviceKey,  true);
 
     return $signingKey;
-  }
-
-
-  /**
-   * @internal
-   * @param string $method (optional)
-   * @param string $path (optional)
-   * @param array $headers (optional)
-   * @param array $options (optional)
-   * @return array
-   */
-  protected function request($method = 'GET', $path = '/', $headers = array(), $options = array())
-  {
-    // build url using path and endpoint
-    $url = sprintf('%s/%s', $this->endpoint, ltrim($path, '/'));
-
-    // assemble headers
-    $headers = array_replace(
-      array(
-        'Date' => gmdate('D, d M Y H:i:s \G\M\T'),
-        'Host' => parse_url($url, PHP_URL_HOST),
-        static::HEADER_SHA256 => hash('sha256', '')
-      ),
-      $headers
-    );
-    ksort($headers);
-    $headers['Authorization'] = $this->sign($method, $url, $headers);
-
-    // format headers
-    $curlHeaders = array();
-    foreach ($headers as $key => $value) {
-      // prevent duplicate content-length header, i.e. let curl handle it
-      if ($key !== 'Content-Length') {
-        $curlHeaders[] = "$key: $value";
-      }
-    }
-
-    // perform curl request
-    return static::curl($method, $url, $curlHeaders, $options);
   }
 
 
