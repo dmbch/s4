@@ -108,8 +108,8 @@ class S4
     $this->bucket = $bucket;
     $this->region = $region;
 
-    $host = ($region === static::REGION_VIRGINIA) ? 's3' : "s3-$region";
-    $this->endpoint = str_replace('@host', $host, static::ENDPOINT_URL_TEMPLATE);
+    $host = ($region === self::REGION_VIRGINIA) ? 's3' : "s3-$region";
+    $this->endpoint = str_replace('@host', $host, self::ENDPOINT_URL_TEMPLATE);
   }
 
 
@@ -133,9 +133,9 @@ class S4
     $cache = (0 === strpos($acl, 'public')) ? 'public' : 'private';
     $headers = array_replace(
       array(
-        static::HEADER_ACL        => $acl,
-        static::HEADER_REDUNDANCY => $redundancy,
-        static::HEADER_SHA256     => $hash,
+        self::HEADER_ACL          => $acl,
+        self::HEADER_REDUNDANCY   => $redundancy,
+        self::HEADER_SHA256       => $hash,
         'Content-MD5'             => $checksum,
         'Content-Length'          => $length,
         'Content-Type'            => $type,
@@ -193,7 +193,7 @@ class S4
 
     // prepare result
     rewind($handle);
-    $response['result'] = $file ?: stream_get_contents($handle);
+    $response['result'] = $file ? $file : stream_get_contents($handle);
 
     // handle handle
     if ($closeHandle) { fclose($handle); } else { fflush($handle); }
@@ -253,10 +253,8 @@ class S4
    */
   public function tmpurl($key, $ttl = 3600, $method = 'GET')
   {
-    // generate date string
-    $date = gmdate('Ymd\THis\Z');
-
     // prepare url parameters
+    $date = gmdate('Ymd\THis\Z');
     $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
     $scope = sprintf('%s/%s/s3/aws4_request', gmdate('Ymd'), $this->region);
     $params = array(
@@ -318,7 +316,7 @@ class S4
     }
     $headerList = rtrim(vsprintf($format, $args), "\n");
     $keyList = implode(';', $keys);
-    $hash = $headers[static::HEADER_SHA256];
+    $hash = $headers[self::HEADER_SHA256];
     $date = $headers['Date'];
 
     // generate request checksum
@@ -411,7 +409,7 @@ class S4
       array(
         'Date' => gmdate('D, d M Y H:i:s \G\M\T'),
         'Host' => parse_url($url, PHP_URL_HOST),
-        static::HEADER_SHA256 => hash('sha256', '')
+        self::HEADER_SHA256 => hash('sha256', '')
       ),
       $headers
     );
@@ -455,14 +453,14 @@ class S4
     ));
 
     // perform request, gather response data
-    $result = curl_exec($handle) ?: null;
-    $error = curl_error($handle) ?: null;
-    $info = curl_getinfo($handle) ?: array();
+    $result = curl_exec($handle);
+    $error = curl_error($handle);
+    $info = curl_getinfo($handle);
 
     // close curl handle
     curl_close($handle);
 
     // process response data
-    return array_merge($info, compact('result', 'error'));
+    return array_merge($info ? $info : array(), compact('result', 'error'));
   }
 }

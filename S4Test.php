@@ -13,7 +13,7 @@ class S4Test extends PHPUnit_Framework_TestCase
 
   protected function setUp()
   {
-    $region = getenv('S4_REGION') ?: S4::REGION_IRELAND;
+    $region = getenv('S4_REGION') ? getenv('S4_REGION') : S4::REGION_IRELAND;
 
     if ($region === S4::REGION_VIRGINIA) {
       $xml = '';
@@ -55,7 +55,9 @@ class S4Test extends PHPUnit_Framework_TestCase
    */
   protected static function uuid()
   {
-    $data = openssl_random_pseudo_bytes(16);
+    $handle = fopen('/dev/urandom', 'rb');
+    $data = fread($handle, 16);
+    fclose($handle);
 
     $data[6] = chr(ord($data[6]) & 0x0f | 0x40);
     $data[8] = chr(ord($data[8]) & 0x3f | 0x80);
