@@ -131,7 +131,7 @@ class S4
 
     // prepare headers
     $cache = (0 === strpos($acl, 'public')) ? 'public' : 'private';
-    $headers = array_replace(
+    $headers = array_merge(
       array(
         self::HEADER_ACL          => $acl,
         self::HEADER_REDUNDANCY   => $redundancy,
@@ -418,7 +418,7 @@ class S4
     $path = sprintf('/%s', ltrim($path, '/'));
     $url = sprintf('%s%s', $this->endpoint, $path);
 
-    $headers = array_replace(
+    $headers = array_merge(
       array(
         'Date' => gmdate('D, d M Y H:i:s \G\M\T'),
         'Host' => parse_url($url, PHP_URL_HOST),
@@ -454,7 +454,7 @@ class S4
     $handle = curl_init();
 
     // configure curl
-    curl_setopt_array($handle, array_replace(
+    curl_setopt_array($handle, array_merge(
       array(
         CURLOPT_URL             => $url,
         CURLOPT_CUSTOMREQUEST   => $method,
