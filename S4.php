@@ -16,14 +16,6 @@
 class S4
 {
   /**
-   * String formats
-   */
-  const FORMAT_URL            = 'https://%s.amazonaws.com';
-  const FORMAT_SCOPE          = '%s/%s/s3/aws4_request';
-  const FORMAT_STRING         = "AWS4-HMAC-SHA256\n%s\n%s\n%s";
-  const FORMAT_REQUEST        = "%s\n%s\n%s\n%s\n\n%s\n%s";
-
-  /**
    * AWS/S3 regions
    * http://docs.aws.amazon.com/general/latest/gr/rande.html#s3_region
    */
@@ -49,12 +41,6 @@ class S4
   const ACL_LOG_WRITE         = 'log-delivery-write';
 
   /**
-   * AWS/S3 encryption algo
-   * http://docs.aws.amazon.com/AmazonS3/latest/dev/SSEUsingRESTAPI.html
-   */
-  const ENCRYPTION_AES256     = 'AES256';
-
-  /**
    * AWS/S3 storage redundancy
    * http://docs.aws.amazon.com/AmazonS3/latest/dev/UsingMetadata.html
    */
@@ -66,7 +52,6 @@ class S4
    * http://docs.aws.amazon.com/AmazonS3/latest/API/RESTCommonRequestHeaders.html
    */
   const HEADER_ACL            = 'x-amz-acl';
-  const HEADER_ENCRYPTION     = 'x-amz-server-side-encryption';
   const HEADER_REDUNDANCY     = 'x-amz-storage-class';
   const HEADER_SHA256         = 'x-amz-content-sha256';
 
@@ -79,7 +64,7 @@ class S4
   /**
    * @var string
    */
-  protected $secretKey;
+  protected $signingKey;
 
   /**
    * @var string
@@ -89,7 +74,7 @@ class S4
   /**
    * @var string
    */
-  protected $region;
+  protected $scope;
 
   /**
    * @var string
@@ -106,13 +91,21 @@ class S4
    */
   public function __construct($accessKey, $secretKey, $bucket, $region = self::REGION_VIRGINIA)
   {
-    $this->accessKey = $accessKey;
-    $this->secretKey = $secretKey;
     $this->bucket = $bucket;
-    $this->region = $region;
-
+    $this->accessKey = $accessKey;
+    $this->signingKey = array_reduce(
+      array(gmdate('Ymd'), $region, 's3', 'aws4_request'),
+      function ($key, $value) {
+        return hash_hmac('sha256', $value, $key, true);
+      },
+      "AWS4$secretKey"
+    );
+    $this->scope = sprintf(
+      '%s/%s/s3/aws4_request',
+      gmdate('Ymd'), $region
+    );
     $this->endpoint = sprintf(
-      static::FORMAT_URL,
+      'https://%s.amazonaws.com',
       ($region === static::REGION_VIRGINIA) ? 's3' : "s3-$region"
     );
   }
@@ -259,7 +252,6 @@ class S4
 
 
   /**
-   * @internal
    * @param string $key (optional)
    * @param string $method (optional)
    * @param array $headers (optional)
@@ -268,20 +260,19 @@ class S4
    */
   public function req($key = '/', $method = 'GET', $headers = array(), $options = array())
   {
-    // build url using path and endpoint
+    // build url using key and endpoint
     $url = sprintf('%s/%s/%s', $this->endpoint, $this->bucket, ltrim($key, '/'));
 
     // assemble headers
     $headers = array_replace(
       array(
-        'Date' => gmdate('D, d M Y H:i:s \G\M\T'),
+        'Date' => gmdate('Ymd\THis\Z'),
         'Host' => parse_url($url, PHP_URL_HOST),
         static::HEADER_SHA256 => hash('sha256', '')
       ),
       $headers
     );
-    ksort($headers);
-    $headers['Authorization'] = $this->sign($method, $url, $headers);
+    $headers['Authorization'] = $this->auth($method, $url, $headers);
 
     // format headers
     $curlHeaders = array();
@@ -308,31 +299,19 @@ class S4
   public function url($key, $ttl = 3600, $method = 'GET')
   {
     // prepare url parameters
-    $date = gmdate('Ymd\THis\Z');
     $path = sprintf('/%s/%s', $this->bucket, ltrim($key, '/'));
-    $scope = sprintf(static::FORMAT_SCOPE, gmdate('Ymd'), $this->region);
     $params = array(
       'X-Amz-Algorithm'     => 'AWS4-HMAC-SHA256',
-      'X-Amz-Credential'    => sprintf('%s/%s', $this->accessKey, $scope),
-      'X-Amz-Date'          => $date,
+      'X-Amz-Credential'    => sprintf('%s/%s', $this->accessKey, $this->scope),
+      'X-Amz-Date'          => gmdate('Ymd\THis\Z'),
       'X-Amz-Expires'       => $ttl,
       'X-Amz-SignedHeaders' => 'host'
     );
-    $query = http_build_query($params);
     $host = parse_url($this->endpoint, PHP_URL_HOST);
+    $url = sprintf('%s%s?%s', $this->endpoint, $path, http_build_query($params));
 
-    // generate request checksum
-    $request = sprintf(
-      static::FORMAT_REQUEST,
-      $method, $path, $query, "host:$host", 'host', 'UNSIGNED-PAYLOAD'
-    );
-    $hash = hash('sha256', $request);
-
-    // prepare signature
-    $string = sprintf(static::FORMAT_STRING, $date, $scope, $hash);
-
-    // calculate signature
-    $params['X-Amz-Signature'] = hash_hmac('sha256', $string, $this->keygen());
+    // add signature param
+    $params['X-Amz-Signature'] = $this->sign($method, $url, compact('host'));
 
     // assemble url
     return sprintf('%s%s?%s', $this->endpoint, $path, http_build_query($params));
@@ -342,6 +321,27 @@ class S4
   /**
    * http://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
    *
+   * @internal
+   * @param string $method
+   * @param string $url
+   * @param array $headers
+   * @return string
+   */
+  protected function auth($method, $url, $headers)
+  {
+    ksort($headers);
+
+    return sprintf(
+      'AWS4-HMAC-SHA256 Credential=%s/%s,SignedHeaders=%s,Signature=%s',
+      $this->accessKey,
+      $this->scope,
+      implode(';', array_map('strtolower', array_keys($headers))),
+      $this->sign($method, $url, $headers)
+    );
+  }
+
+
+  /**
    * @internal
    * @param string $method
    * @param string $url
@@ -358,52 +358,40 @@ class S4
     $query = http_build_query($params);
 
     // process headers
+    ksort($headers);
     $format = '';
-    $args = $keys = array();
+    $keys = $args = array();
     foreach ($headers as $header => $value) {
       $format .= "%s:%s\n";
       $key = strtolower($header);
       array_push($args, $key, $value);
       array_push($keys, $key);
     }
-    $headerList = rtrim(vsprintf($format, $args), "\n");
     $keyList = implode(';', $keys);
-    $bodyHash = $headers[static::HEADER_SHA256];
-    $date = $headers['Date'];
+    $headerList = rtrim(vsprintf($format, $args), "\n");
+
+    if (isset($headers['Date'])) {
+      $date = $headers['Date'];
+      $bodyHash = $headers[static::HEADER_SHA256];
+    }
+    else {
+      $date = $params['X-Amz-Date'];
+      $bodyHash = 'UNSIGNED-PAYLOAD';
+    }
 
     // generate request checksum
     $request = sprintf(
-      static::FORMAT_REQUEST,
+      "%s\n%s\n%s\n%s\n\n%s\n%s",
       $method, $path, $query, $headerList, $keyList, $bodyHash
     );
     $reqHash = hash('sha256', $request);
 
     // prepare signature
-    $scope = sprintf(static::FORMAT_SCOPE, gmdate('Ymd'), $this->region);
-    $string = sprintf(static::FORMAT_STRING, $date, $scope, $reqHash);
-    $signature = hash_hmac('sha256', $string, $this->keygen());
-
-    // calculate signature
-    return sprintf(
-      'AWS4-HMAC-SHA256 Credential=%s/%s,SignedHeaders=%s,Signature=%s',
-      $this->accessKey, $scope, $keyList, $signature
+    $string = sprintf(
+      "AWS4-HMAC-SHA256\n%s\n%s\n%s",
+      $date, $this->scope, $reqHash
     );
-  }
-
-
-  /**
-   * @internal
-   * @return string
-   */
-  protected function keygen()
-  {
-    $secretKey  = "AWS4$this->secretKey";
-    $dateKey    = hash_hmac('sha256', gmdate('Ymd'),  $secretKey,   true);
-    $regionKey  = hash_hmac('sha256', $this->region,  $dateKey,     true);
-    $serviceKey = hash_hmac('sha256', 's3',           $regionKey,   true);
-    $signingKey = hash_hmac('sha256', 'aws4_request', $serviceKey,  true);
-
-    return $signingKey;
+    return hash_hmac('sha256', $string, $this->signingKey);
   }
 
 

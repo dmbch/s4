@@ -36,7 +36,7 @@ class S4Test extends PHPUnit_Framework_TestCase
       's4test-'. static::uuid(),
       $region
     );
-    $response = $this->s4->put('', $xml);
+    $this->s4->put('', $xml);
   }
 
 
@@ -46,7 +46,7 @@ class S4Test extends PHPUnit_Framework_TestCase
     foreach ($response['result'] as $file) {
       $this->s4->del($file['key']);
     }
-    $response = $this->s4->del('');
+    $this->s4->del('');
   }
 
 
@@ -83,6 +83,7 @@ class S4Test extends PHPUnit_Framework_TestCase
     $handle = fopen($file, 'r');
     $string  = file_get_contents($file);
     fwrite($handle, $string, filesize($file));
+    $this->assertNotEmpty($string);
 
     $response = $this->s4->put(self::FILE_1, $file);
     $this->assertEquals(200, $response['http_code']);
