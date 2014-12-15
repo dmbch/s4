@@ -22,6 +22,7 @@ class S4
   const REGION_AUSTRALIA      = 'ap-southeast-2';
   const REGION_BRAZIL         = 'sa-east-1';
   const REGION_CALIFORNIA     = 'us-west-1';
+  const REGION_GERMANY        = 'eu-central-1';
   const REGION_IRELAND        = 'eu-west-1';
   const REGION_JAPAN          = 'ap-northeast-1';
   const REGION_OREGON         = 'us-west-2';
